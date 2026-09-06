@@ -1,0 +1,39 @@
+{
+  "FileVersion": 3,
+  "EngineAssociation": "{1BDCCAE3-441B-170E-A74C-E7BB0D8A6420}",
+  "Category": "",
+  "Description": "",
+  "Modules": [
+    {
+      "Name": "PopStrike",
+      "Type": "Runtime",
+      "LoadingPhase": "Default"
+    },
+    {
+      "Name": "PopStrikeEditor",
+      "Type": "Editor",
+      "LoadingPhase": "PostEngineInit"
+    }
+  ],
+  "Plugins": [
+    {
+      "Name": "ModelingToolsEditorMode",
+      "Enabled": true,
+      "TargetAllowList": [
+        "Editor"
+      ]
+    },
+    {
+      "Name": "ModelContextProtocol",
+      "Enabled": true
+    },
+    {
+      "Name": "EditorToolset",
+      "Enabled": true
+    },
+    {
+      "Name": "PythonScriptPlugin",
+      "Enabled": true
+    }
+  ]
+}
