@@ -8,11 +8,6 @@
       "Name": "PopStrike",
       "Type": "Runtime",
       "LoadingPhase": "Default"
-    },
-    {
-      "Name": "PopStrikeEditor",
-      "Type": "Editor",
-      "LoadingPhase": "PostEngineInit"
     }
   ],
   "Plugins": [
@@ -29,10 +24,6 @@
     },
     {
       "Name": "EditorToolset",
-      "Enabled": true
-    },
-    {
-      "Name": "PythonScriptPlugin",
       "Enabled": true
     }
   ]
