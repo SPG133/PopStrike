@@ -6,8 +6,10 @@ class UTexture2D;
 
 namespace PSAvatar
 {
-    bool ValidateNetworkAvatar(const TArray<uint8>& Bytes);
+    // 选择图片并生成网络头像
+    UTexture2D* LoadPreviewTexture(
+        const FString& Filename);
+
+    
     bool PickImageFile(FString& OutFilename);
-    bool BuildNetworkAvatar(const FString& Filename, TArray<uint8>& OutBytes, UTexture2D*& OutTexture);
-    UTexture2D* TextureFromBytes(const TArray<uint8>& Bytes);
 }

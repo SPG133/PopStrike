@@ -11,7 +11,8 @@ public class PopStrike : ModuleRules
             "Core",
             "CoreUObject",
             "Engine",
-            "UMG"
+            "UMG",
+            "OnlineSubsystemUtils"
         });
 
         PrivateDependencyModuleNames.AddRange(new string[]

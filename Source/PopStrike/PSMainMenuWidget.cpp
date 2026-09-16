@@ -1,136 +1,71 @@
 #include "PSMainMenuWidget.h"
 
-#include "Components/Button.h"
-#include "Components/EditableTextBox.h"
-#include "Components/Image.h"
-#include "Components/TextBlock.h"
 #include "Engine/Texture2D.h"
-#include "GameFramework/PlayerController.h"
-#include "Misc/Paths.h"
 #include "PSAvatar.h"
 #include "PSConnectionSubsystem.h"
-#include "PSGameConfig.h"
 
-void UPSMainMenuWidget::NativeConstruct()
-{
-    Super::NativeConstruct();
-    SetIsFocusable(true);
+#include "IpNetDriver.h"
 
-    Txt_ErrorMessage->SetVisibility(ESlateVisibility::Collapsed);
-    RestoreSavedState();
-    if (auto* Session = GetGameInstance()->GetSubsystem<UPSConnectionSubsystem>())
-        Session->OnConnectionChanged.AddUObject(this, &ThisClass::RefreshConnection);
-    RefreshConnection();
-}
-
-void UPSMainMenuWidget::NativeDestruct()
-{
-    if (GetGameInstance())
-        if (auto* Session = GetGameInstance()->GetSubsystem<UPSConnectionSubsystem>()) Session->OnConnectionChanged.RemoveAll(this);
-    Super::NativeDestruct();
-}
-
-void UPSMainMenuWidget::RefreshConnection()
-{
-    if (auto* Session = GetGameInstance()->GetSubsystem<UPSConnectionSubsystem>())
-    {
-        Btn_StartGame->SetIsEnabled(!Session->IsConnecting());
-        Btn_UploadAvatar->SetIsEnabled(!Session->IsConnecting());
-        Edt_PlayerName->SetIsEnabled(!Session->IsConnecting());
-        Edt_ServerAddress->SetIsEnabled(!Session->IsConnecting());
-        const FString Error = Session->ConsumeError();
-        if (!Error.IsEmpty()) ShowMessage(Error);
-    }
-}
-
-void UPSMainMenuWidget::RestoreSavedState()
-{
-    UPSConnectionSubsystem* Session = GetGameInstance()->GetSubsystem<UPSConnectionSubsystem>();
-    if (!Session)
-    {
-        return;
-    }
-
-    if (!Session->GetPlayerName().IsEmpty())
-    {
-        Edt_PlayerName->SetText(FText::FromString(Session->GetPlayerName()));
-    }
-    Edt_ServerAddress->SetText(FText::FromString(Session->GetServerAddress()));
-
-    AvatarTexture = PSAvatar::TextureFromBytes(Session->GetAvatarBytes());
-    if (AvatarTexture)
-    {
-        Img_AvatarPreview->SetBrushFromTexture(AvatarTexture, true);
-        Img_AvatarPreview->SetColorAndOpacity(FLinearColor::White);
-    }
-
-    const FString Error = Session->ConsumeError();
-    if (!Error.IsEmpty())
-    {
-        ShowMessage(Error);
-    }
-}
-
-void UPSMainMenuWidget::OnStartClicked()
-{
-    FString Name = Edt_PlayerName->GetText().ToString().TrimStartAndEnd();
-    FString Address = Edt_ServerAddress->GetText().ToString().TrimStartAndEnd();
-
-    if (Name.IsEmpty() || Name.Len() > PSConfig::MaxNameLength)
-    {
-        ShowMessage(TEXT("请输入 1~16 个字符的玩家名。"));
-        return;
-    }
-    if (!UPSConnectionSubsystem::IsValidAddress(Address))
-    {
-        ShowMessage(TEXT("请输入服务器地址，例如 127.0.0.1:7777。"));
-        return;
-    }
-
-    UPSConnectionSubsystem* Session = GetGameInstance()->GetSubsystem<UPSConnectionSubsystem>();
-    APlayerController* PC = GetOwningPlayer();
-    if (!Session || !PC)
-    {
-        ShowMessage(TEXT("无法初始化连接。"));
-        return;
-    }
-
-    Session->SetPlayerName(Name);
-    Session->SetServerAddress(Address);
-
-    ShowMessage(TEXT("正在连接服务器……"));
-    Session->BeginConnection(PC, Address);
-}
-
-void UPSMainMenuWidget::OnAvatarClicked()
+void UPSMainMenuWidget::SelectAvatar()
 {
     FString Filename;
+
     if (!PSAvatar::PickImageFile(Filename))
     {
         return;
     }
 
-    TArray<uint8> Bytes;
-    UTexture2D* Texture = nullptr;
-    if (!PSAvatar::BuildNetworkAvatar(Filename, Bytes, Texture))
+    if (UGameInstance *GI = GetGameInstance())
     {
-        Txt_AvatarHint->SetText(FText::FromString(TEXT("图片无效或压缩失败。")));
-        return;
+        if (UPSConnectionSubsystem *Connection =
+                GI->GetSubsystem<UPSConnectionSubsystem>())
+        {
+            Connection->SetAvatarFilename(Filename);
+        }
     }
 
-    AvatarTexture = Texture;
-    Img_AvatarPreview->SetBrushFromTexture(AvatarTexture, true);
-    Img_AvatarPreview->SetColorAndOpacity(FLinearColor::White);
-    Txt_AvatarHint->SetText(FText::FromString(FPaths::GetCleanFilename(Filename)));
-
-    if (UPSConnectionSubsystem* Session = GetGameInstance()->GetSubsystem<UPSConnectionSubsystem>())
+    if (UTexture2D *PreviewTexture =
+            PSAvatar::LoadPreviewTexture(Filename))
     {
-        Session->SetAvatarBytes(MoveTemp(Bytes));
+        BP_OnAvatarChanged(PreviewTexture);
     }
 }
 
-void UPSMainMenuWidget::ShowMessage(const FString& Text)
+FString UPSMainMenuWidget::ConnectToServer(
+    const FString &ServerAddress,
+    const FString &PlayerName)
 {
-    Txt_ErrorMessage->SetText(FText::FromString(Text));
-    Txt_ErrorMessage->SetVisibility(ESlateVisibility::Visible);
+    const UIpNetDriver* DefaultDriver = GetDefault<UIpNetDriver>();
+    const FString CleanName = PlayerName.TrimStartAndEnd();
+
+    UE_LOG(
+        LogTemp,
+        Warning,
+        TEXT("IpNetDriver config: InitialConnectTimeout=%.2f ConnectionTimeout=%.2f"),
+        DefaultDriver->InitialConnectTimeout,
+        DefaultDriver->ConnectionTimeout);
+
+    if (CleanName.IsEmpty() || CleanName.Len() > 16)
+    {
+        return TEXT("玩家名称必须为 1～16 个字符。");
+    }
+
+    const FString CleanAddress = ServerAddress.TrimStartAndEnd();
+    if (CleanAddress.IsEmpty())
+    {
+        return TEXT("服务器地址不能为空。");
+    }
+
+    UGameInstance *GameInstance = GetGameInstance();
+    UPSConnectionSubsystem *Connection = GameInstance
+                                             ? GameInstance->GetSubsystem<UPSConnectionSubsystem>()
+                                             : nullptr;
+    if (!Connection || !GetOwningPlayer())
+    {
+        return TEXT("无法开始连接。");
+    }
+
+    Connection->SetPlayerName(CleanName);
+    Connection->Connect(GetOwningPlayer(), CleanAddress);
+    return {};
 }
