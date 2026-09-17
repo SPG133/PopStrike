@@ -1,125 +1,79 @@
 #include "PSAvatar.h"
 
+#include "HAL/FileManager.h"
+#include "IImageWrapper.h"
+#include "IImageWrapperModule.h"
+#include "ImageCore.h"
 #include "ImageUtils.h"
-#include "Misc/Paths.h"
+#include "Misc/FileHelper.h"
 
 #if PLATFORM_WINDOWS
-
 #include "Windows/AllowWindowsPlatformTypes.h"
 #include <commdlg.h>
 #include "Windows/HideWindowsPlatformTypes.h"
-
 #endif
 
+namespace
+{
+    TSharedPtr<IImageWrapper> ReadImage(const TArray<uint8>& Bytes, int32 MaxSide)
+    {
+        if (Bytes.IsEmpty()) return nullptr;
+
+        auto& Module = FModuleManager::LoadModuleChecked<IImageWrapperModule>("ImageWrapper");
+        const EImageFormat Format = Module.DetectImageFormat(Bytes.GetData(), Bytes.Num());
+        if (Format != EImageFormat::PNG && Format != EImageFormat::JPEG) return nullptr;
+
+        auto Image = Module.CreateImageWrapper(Format);
+        if (!Image || !Image->SetCompressed(Bytes.GetData(), Bytes.Num())) return nullptr;
+        if (Image->GetWidth() <= 0 || Image->GetHeight() <= 0 ||
+            Image->GetWidth() > MaxSide || Image->GetHeight() > MaxSide) return nullptr;
+        return Image;
+    }
+}
 
 bool PSAvatar::PickImageFile(FString& OutFilename)
 {
 #if PLATFORM_WINDOWS
-
-    // 用大 Buffer，避免普通 MAX_PATH 太短
-    WCHAR FileBuffer[32768] = {};
-
-    OPENFILENAMEW Dialog;
-    FMemory::Memzero(Dialog);
-
-    Dialog.lStructSize = sizeof(OPENFILENAMEW);
-
-    // 暂时不指定父窗口，简单可靠
-    Dialog.hwndOwner = nullptr;
-
-    Dialog.lpstrFile = FileBuffer;
-    Dialog.nMaxFile = UE_ARRAY_COUNT(FileBuffer);
-
-    // Windows 文件选择器里的类型过滤
-    Dialog.lpstrFilter =
-        L"Image Files (*.png;*.jpg;*.jpeg)\0"
-        L"*.png;*.jpg;*.jpeg\0"
-        L"PNG Files (*.png)\0"
-        L"*.png\0"
-        L"JPEG Files (*.jpg;*.jpeg)\0"
-        L"*.jpg;*.jpeg\0"
-        L"\0";
-
-    Dialog.nFilterIndex = 1;
-
-    Dialog.Flags =
-        OFN_FILEMUSTEXIST |
-        OFN_PATHMUSTEXIST |
-        OFN_NOCHANGEDIR |
-        OFN_EXPLORER;
-
-
-    // 真正打开 Windows 文件选择窗口
+    WCHAR Buffer[32768] = {};
+    OPENFILENAMEW Dialog{};
+    Dialog.lStructSize = sizeof(Dialog);
+    Dialog.lpstrFile = Buffer;
+    Dialog.nMaxFile = UE_ARRAY_COUNT(Buffer);
+    Dialog.lpstrFilter = L"PNG/JPEG\0*.png;*.jpg;*.jpeg\0\0";
+    Dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
     if (GetOpenFileNameW(&Dialog))
     {
-        OutFilename = FString(FileBuffer);
-
-        UE_LOG(
-            LogTemp,
-            Log,
-            TEXT("Avatar selected: %s"),
-            *OutFilename);
-
+        OutFilename = Buffer;
         return true;
     }
-
 #endif
-
     return false;
 }
 
-
-UTexture2D* PSAvatar::LoadPreviewTexture(
-    const FString& Filename)
+bool PSAvatar::EncodeFile(const FString& Filename, TArray<uint8>& OutBytes)
 {
-    // 文件路径为空
-    if (Filename.IsEmpty())
-    {
-        UE_LOG(
-            LogTemp,
-            Warning,
-            TEXT("LoadPreviewTexture: Filename is empty."));
+    OutBytes.Reset();
+    const int64 Size = IFileManager::Get().FileSize(*Filename);
+    if (Size <= 0 || Size > 8 * 1024 * 1024) return false;
 
-        return nullptr;
-    }
+    TArray<uint8> Source;
+    FImage Image, Small;
+    if (!FFileHelper::LoadFileToArray(Source, *Filename) || !ReadImage(Source, 4096) ||
+        !FImageUtils::DecompressImage(Source.GetData(), Source.Num(), Image)) return false;
 
+    Image.ResizeTo(Small, 128, 128, ERawImageFormat::BGRA8, EGammaSpace::sRGB);
+    TArray64<uint8> Compressed;
+    if (!FImageUtils::CompressImage(Compressed, TEXT("jpg"), Small, 75) ||
+        Compressed.Num() > MaxBytes) return false;
 
-    // 文件不存在
-    if (!FPaths::FileExists(Filename))
-    {
-        UE_LOG(
-            LogTemp,
-            Warning,
-            TEXT("LoadPreviewTexture: File does not exist: %s"),
-            *Filename);
+    OutBytes.Append(Compressed.GetData(), Compressed.Num());
+    return true;
+}
 
-        return nullptr;
-    }
-
-
-    // UE 直接从硬盘图片创建一个临时 Texture2D
-    UTexture2D* Texture =
-        FImageUtils::ImportFileAsTexture2D(Filename);
-
-
-    if (!Texture)
-    {
-        UE_LOG(
-            LogTemp,
-            Error,
-            TEXT("LoadPreviewTexture: Failed to load image: %s"),
-            *Filename);
-
-        return nullptr;
-    }
-
-
-    UE_LOG(
-        LogTemp,
-        Log,
-        TEXT("Avatar preview loaded successfully: %s"),
-        *Filename);
-
-
-    return Texture;
+bool PSAvatar::IsValid(const TArray<uint8>& Bytes)
+{
+    if (Bytes.IsEmpty()) return true;
+    if (Bytes.Num() > MaxBytes || !ReadImage(Bytes, 128)) return false;
+    FImage Image;
+    return FImageUtils::DecompressImage(Bytes.GetData(), Bytes.Num(), Image);
 }

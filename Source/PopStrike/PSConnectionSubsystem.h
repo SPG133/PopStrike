@@ -17,6 +17,9 @@ class POPSTRIKE_API UPSConnectionSubsystem
     GENERATED_BODY()
 
 public:
+    UPROPERTY(Transient)
+    TArray<uint8> AvatarBytes;
+
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
@@ -37,21 +40,10 @@ public:
         return  Playername;
     }
 
-    void SetAvatarFilename(const FString& Filename)
-    {
-        AvatarFilename = Filename;
-    }
-
-    const FString& GetAvatarFilename() const
-    {
-        return AvatarFilename;
-    }
-
 private:
 
     void HandleNetworkFailure(
         UWorld* World, UNetDriver*, ENetworkFailure::Type, const FString& Error);
 
-    FString AvatarFilename;
     FString Playername;
 };

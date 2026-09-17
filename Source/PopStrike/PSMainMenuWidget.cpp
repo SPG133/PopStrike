@@ -3,8 +3,7 @@
 #include "Engine/Texture2D.h"
 #include "PSAvatar.h"
 #include "PSConnectionSubsystem.h"
-
-#include "IpNetDriver.h"
+#include "ImageUtils.h"
 
 void UPSMainMenuWidget::SelectAvatar()
 {
@@ -15,17 +14,24 @@ void UPSMainMenuWidget::SelectAvatar()
         return;
     }
 
+    TArray<uint8> Bytes;
+    if (!PSAvatar::EncodeFile(Filename, Bytes))
+    {
+        BP_OnAvatarError(FText::FromString(TEXT("请选择不超过 8MB、4096×4096 的 PNG/JPG 图片。")));
+        return;
+    }
+
     if (UGameInstance *GI = GetGameInstance())
     {
         if (UPSConnectionSubsystem *Connection =
                 GI->GetSubsystem<UPSConnectionSubsystem>())
         {
-            Connection->SetAvatarFilename(Filename);
+            Connection->AvatarBytes = Bytes;
         }
     }
 
     if (UTexture2D *PreviewTexture =
-            PSAvatar::LoadPreviewTexture(Filename))
+            FImageUtils::ImportBufferAsTexture2D(Bytes))
     {
         BP_OnAvatarChanged(PreviewTexture);
     }
@@ -35,15 +41,7 @@ FString UPSMainMenuWidget::ConnectToServer(
     const FString &ServerAddress,
     const FString &PlayerName)
 {
-    const UIpNetDriver* DefaultDriver = GetDefault<UIpNetDriver>();
     const FString CleanName = PlayerName.TrimStartAndEnd();
-
-    UE_LOG(
-        LogTemp,
-        Warning,
-        TEXT("IpNetDriver config: InitialConnectTimeout=%.2f ConnectionTimeout=%.2f"),
-        DefaultDriver->InitialConnectTimeout,
-        DefaultDriver->ConnectionTimeout);
 
     if (CleanName.IsEmpty() || CleanName.Len() > 16)
     {

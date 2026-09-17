@@ -25,6 +25,8 @@ public:
 
 
 protected:
+    UFUNCTION(BlueprintImplementableEvent, Category="PopStrike|Menu")
+    void BP_OnAvatarError(const FText& Message);
 
 
     UFUNCTION(

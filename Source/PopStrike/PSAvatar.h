@@ -2,14 +2,11 @@
 
 #include "CoreMinimal.h"
 
-class UTexture2D;
-
 namespace PSAvatar
 {
-    // 选择图片并生成网络头像
-    UTexture2D* LoadPreviewTexture(
-        const FString& Filename);
+    constexpr int32 MaxBytes = 16 * 1024;
 
-    
     bool PickImageFile(FString& OutFilename);
+    bool EncodeFile(const FString& Filename, TArray<uint8>& OutBytes);
+    bool IsValid(const TArray<uint8>& Bytes);
 }
