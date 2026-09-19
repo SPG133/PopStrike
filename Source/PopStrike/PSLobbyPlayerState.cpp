@@ -14,8 +14,30 @@ void APSLobbyPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& 
 
 UTexture2D* APSLobbyPlayerState::GetAvatar()
 {
-    if (!AvatarTexture && !AvatarBytes.IsEmpty() && GetNetMode() != NM_DedicatedServer)
-        AvatarTexture = FImageUtils::ImportBufferAsTexture2D(AvatarBytes);
+    if (!AvatarTexture && GetNetMode() != NM_DedicatedServer)
+    {
+        if (!AvatarBytes.IsEmpty())
+        {
+            AvatarTexture = FImageUtils::ImportBufferAsTexture2D(AvatarBytes);
+        }
+        else
+        {
+            FRandomStream Random(GetPlayerId());
+            const FColor AvatarColor(
+                Random.RandRange(64, 255),
+                Random.RandRange(64, 255),
+                Random.RandRange(64, 255));
+            AvatarTexture = UTexture2D::CreateTransient(1, 1, PF_B8G8R8A8);
+            if (AvatarTexture)
+            {
+                uint32* Pixel = static_cast<uint32*>(
+                    AvatarTexture->GetPlatformData()->Mips[0].BulkData.Lock(LOCK_READ_WRITE));
+                *Pixel = AvatarColor.DWColor();
+                AvatarTexture->GetPlatformData()->Mips[0].BulkData.Unlock();
+                AvatarTexture->UpdateResource();
+            }
+        }
+    }
     return AvatarTexture;
 }
 

@@ -70,14 +70,6 @@ void APSLobbyPlayerController::ServerStartGame_Implementation()
     auto* Lobby = GetWorld()->GetGameState<APSLobbyGameState>();
     if (!Lobby || !IsRoomHost() || Lobby->bStarting || !Lobby->Maps.IsValidIndex(Lobby->SelectedMap)) return;
 
-    if (Lobby->GetTeamPlayers(EPSLobbyTeam::A).IsEmpty() ||
-        Lobby->GetTeamPlayers(EPSLobbyTeam::B).IsEmpty() ||
-        Lobby->GetTeamPlayers(EPSLobbyTeam::None).Num() > 0)
-    {
-        ClientLobbyError(FText::FromString(TEXT("所有玩家入队且双方至少一人后才能开始。")));
-        return;
-    }
-
     const FString Map = Lobby->Maps[Lobby->SelectedMap].Level.ToSoftObjectPath().GetLongPackageName();
     if (!FPackageName::DoesPackageExist(Map))
     {

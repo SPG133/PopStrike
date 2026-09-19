@@ -21,5 +21,5 @@ struct FPSLobbyMap
     UPROPERTY(EditAnywhere, BlueprintReadOnly) FText Name;
     UPROPERTY(EditAnywhere, BlueprintReadOnly) FText Description;
     UPROPERTY(EditAnywhere, BlueprintReadOnly) TSoftObjectPtr<UWorld> Level;
-    UPROPERTY(EditAnywhere, BlueprintReadOnly) TObjectPtr<UTexture2D> Preview = nullptr;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly) TSoftObjectPtr<UTexture2D> Preview;
 };

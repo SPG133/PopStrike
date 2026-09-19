@@ -12,11 +12,22 @@ APSLobbyGameMode::APSLobbyGameMode()
     DefaultPawnClass = nullptr;
     bStartPlayersAsSpectators = true;
 
-    FPSLobbyMap Map;
-    Map.Name = FText::FromString(TEXT("果汁工厂"));
-    Map.Level = TSoftObjectPtr<UWorld>(FSoftObjectPath(
-        TEXT("/Game/Maps/Level_3/Juice_Factory/L_JuiceFactory.L_JuiceFactory")));
-    AvailableMaps.Add(Map);
+    const auto AddMap = [this](const TCHAR* Name, const TCHAR* Description,
+        const TCHAR* LevelPath, const TCHAR* PreviewPath)
+    {
+        FPSLobbyMap Map;
+        Map.Name = FText::FromString(Name);
+        Map.Description = FText::FromString(Description);
+        Map.Level = TSoftObjectPtr<UWorld>(FSoftObjectPath(LevelPath));
+        Map.Preview = TSoftObjectPtr<UTexture2D>(FSoftObjectPath(PreviewPath));
+        AvailableMaps.Add(MoveTemp(Map));
+    };
+
+    AddMap(
+        TEXT("果汁工厂"),
+        TEXT("在果汁生产线中对战。"),
+        TEXT("/Game/Maps/Level_3/Juice_Factory/L_JuiceFactory.L_JuiceFactory"),
+        TEXT("/Game/UI/MapPreviews/T_JuiceFactoryPreview.T_JuiceFactoryPreview"));
 }
 
 void APSLobbyGameMode::InitGameState()
