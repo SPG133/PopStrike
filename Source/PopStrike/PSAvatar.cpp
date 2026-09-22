@@ -5,6 +5,7 @@
 #include "IImageWrapperModule.h"
 #include "ImageCore.h"
 #include "ImageUtils.h"
+#include "Engine/Texture2D.h"
 #include "Misc/FileHelper.h"
 
 #if PLATFORM_WINDOWS
@@ -76,4 +77,25 @@ bool PSAvatar::IsValid(const TArray<uint8>& Bytes)
     if (Bytes.Num() > MaxBytes || !ReadImage(Bytes, 128)) return false;
     FImage Image;
     return FImageUtils::DecompressImage(Bytes.GetData(), Bytes.Num(), Image);
+}
+
+UTexture2D* PSAvatar::CreateTexture(const TArray<uint8>& Bytes, int32 ColorSeed)
+{
+    if (!Bytes.IsEmpty()) return FImageUtils::ImportBufferAsTexture2D(Bytes);
+
+    FRandomStream Random(ColorSeed);
+    const FColor Color(
+        Random.RandRange(64, 255),
+        Random.RandRange(64, 255),
+        Random.RandRange(64, 255));
+    UTexture2D* Texture = UTexture2D::CreateTransient(1, 1, PF_B8G8R8A8);
+    if (Texture)
+    {
+        uint32* Pixel = static_cast<uint32*>(
+            Texture->GetPlatformData()->Mips[0].BulkData.Lock(LOCK_READ_WRITE));
+        *Pixel = Color.DWColor();
+        Texture->GetPlatformData()->Mips[0].BulkData.Unlock();
+        Texture->UpdateResource();
+    }
+    return Texture;
 }

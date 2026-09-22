@@ -1,14 +1,25 @@
 #include "PSLobbyPlayerState.h"
 
+#include "PSAvatar.h"
 #include "PSLobbyGameState.h"
-#include "Engine/Texture2D.h"
-#include "ImageUtils.h"
+#include "PSMatchPlayerState.h"
 #include "Net/UnrealNetwork.h"
+
+void APSLobbyPlayerState::CopyProperties(APlayerState* PlayerState)
+{
+    Super::CopyProperties(PlayerState);
+    if (auto* MatchPlayer = Cast<APSMatchPlayerState>(PlayerState))
+    {
+        MatchPlayer->Team = Team;
+        MatchPlayer->AvatarBytes = AvatarBytes;
+    }
+}
 
 void APSLobbyPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
     DOREPLIFETIME(APSLobbyPlayerState, Team);
+    DOREPLIFETIME(APSLobbyPlayerState, bIsHost);
     DOREPLIFETIME(APSLobbyPlayerState, AvatarBytes);
 }
 
@@ -16,27 +27,7 @@ UTexture2D* APSLobbyPlayerState::GetAvatar()
 {
     if (!AvatarTexture && GetNetMode() != NM_DedicatedServer)
     {
-        if (!AvatarBytes.IsEmpty())
-        {
-            AvatarTexture = FImageUtils::ImportBufferAsTexture2D(AvatarBytes);
-        }
-        else
-        {
-            FRandomStream Random(GetPlayerId());
-            const FColor AvatarColor(
-                Random.RandRange(64, 255),
-                Random.RandRange(64, 255),
-                Random.RandRange(64, 255));
-            AvatarTexture = UTexture2D::CreateTransient(1, 1, PF_B8G8R8A8);
-            if (AvatarTexture)
-            {
-                uint32* Pixel = static_cast<uint32*>(
-                    AvatarTexture->GetPlatformData()->Mips[0].BulkData.Lock(LOCK_READ_WRITE));
-                *Pixel = AvatarColor.DWColor();
-                AvatarTexture->GetPlatformData()->Mips[0].BulkData.Unlock();
-                AvatarTexture->UpdateResource();
-            }
-        }
+        AvatarTexture = PSAvatar::CreateTexture(AvatarBytes, GetPlayerId());
     }
     return AvatarTexture;
 }

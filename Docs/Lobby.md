@@ -18,6 +18,7 @@ C++ 只维护网络数据：玩家资料、头像字节、队伍、房主、地�
 
 队伍：
 
+- 玩家进房时由服务器自动随机分队（目标队满 3 人则进另一队）；玩家仍可用下方按钮自由换队。
 - `LobbyState.GetTeamPlayers(A)` 得到 A 队数组；逐个调用 `Slot_A1..A3` 中自定义的 `SetPlayer`，没有玩家的位置传空。
 - `LobbyState.GetTeamPlayers(B)` 同理更新 `Slot_B1..B3`。
 
@@ -56,7 +57,7 @@ C++ 只维护网络数据：玩家资料、头像字节、队伍、房主、地�
 
 要让地图列表可在编辑器配置，可建一个继承 `PSLobbyGameMode` 的蓝图 GameMode，在 `Available Maps` 中添加 `Name / Description / Level / Preview`，再把大厅关卡的 Override 改为该蓝图。
 
-比赛地图必须使用自己的比赛 GameMode，不能继续使用 `PSLobbyGameMode`。
+比赛地图必须使用自己的比赛 GameMode，不能继续使用 `PSLobbyGameMode`。现提供 `PSMatchGameMode`（见 `Docs/Match.md`）：在 `L_JuiceFactory` 的 World Settings → GameMode Override 设为 `PSMatchGameMode` 或其蓝图子类。
 
 ## 主菜单与头像
 

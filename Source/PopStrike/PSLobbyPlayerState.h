@@ -22,6 +22,7 @@ public:
     UFUNCTION(BlueprintPure, Category = "Lobby")
     UTexture2D *GetAvatar();
 
+    virtual void CopyProperties(APlayerState* PlayerState) override;
     virtual void OnRep_PlayerName() override;
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override;
 

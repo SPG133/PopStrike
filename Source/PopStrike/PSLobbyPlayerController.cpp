@@ -79,7 +79,9 @@ void APSLobbyPlayerController::ServerStartGame_Implementation()
 
     Lobby->bStarting = true;
     Lobby->BroadcastChanged();
-    GetWorld()->ServerTravel(Map);
+    const int32 ExpectedPlayers = Lobby->PlayerArray.Num();
+    GetWorld()->ServerTravel(FString::Printf(
+        TEXT("%s?ExpectedPlayers=%d"), *Map, ExpectedPlayers));
 }
 
 void APSLobbyPlayerController::ClientLobbyError_Implementation(const FText& Message)

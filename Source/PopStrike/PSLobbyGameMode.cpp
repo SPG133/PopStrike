@@ -11,6 +11,7 @@ APSLobbyGameMode::APSLobbyGameMode()
     GameStateClass = APSLobbyGameState::StaticClass();
     DefaultPawnClass = nullptr;
     bStartPlayersAsSpectators = true;
+    bUseSeamlessTravel = true;
 
     const auto AddMap = [this](const TCHAR* Name, const TCHAR* Description,
         const TCHAR* LevelPath, const TCHAR* PreviewPath)
@@ -61,6 +62,16 @@ void APSLobbyGameMode::PostLogin(APlayerController *Player)
             PS->ForceNetUpdate();
         }
     }
+    // 进房自动随机分队；目标队满 3 人则去另一队。玩家之后仍可在客厅自由换队
+    if (auto* PS = Player->GetPlayerState<APSLobbyPlayerState>(); PS && PS->Team == EPSLobbyTeam::None)
+    {
+        EPSLobbyTeam Team = FMath::RandBool() ? EPSLobbyTeam::A : EPSLobbyTeam::B;
+        if (Lobby->GetTeamPlayers(Team).Num() >= 3)
+            Team = (Team == EPSLobbyTeam::A) ? EPSLobbyTeam::B : EPSLobbyTeam::A;
+        PS->Team = Team;
+        PS->ForceNetUpdate();
+    }
+
     Lobby->BroadcastChanged();
     CastChecked<APSLobbyPlayerController>(Player)->ClientRequestProfile();
 }
