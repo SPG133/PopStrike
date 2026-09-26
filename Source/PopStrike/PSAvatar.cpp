@@ -6,6 +6,7 @@
 #include "ImageCore.h"
 #include "ImageUtils.h"
 #include "Engine/Texture2D.h"
+#include "Framework/Application/SlateApplication.h"
 #include "Misc/FileHelper.h"
 
 #if PLATFORM_WINDOWS
@@ -42,6 +43,11 @@ bool PSAvatar::PickImageFile(FString& OutFilename)
     Dialog.nMaxFile = UE_ARRAY_COUNT(Buffer);
     Dialog.lpstrFilter = L"PNG/JPEG\0*.png;*.jpg;*.jpeg\0\0";
     Dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+    if (FSlateApplication::IsInitialized())
+    {
+        Dialog.hwndOwner = static_cast<HWND>(const_cast<void*>(
+            FSlateApplication::Get().FindBestParentWindowHandleForDialogs(nullptr)));
+    }
     if (GetOpenFileNameW(&Dialog))
     {
         OutFilename = Buffer;

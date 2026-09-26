@@ -11,6 +11,8 @@ public class PopStrike : ModuleRules
             "Core",
             "CoreUObject",
             "Engine",
+            "EnhancedInput",
+            "InputCore",
             "UMG",
             "OnlineSubsystemUtils"
         });
@@ -22,6 +24,9 @@ public class PopStrike : ModuleRules
             "ImageCore",
             "ImageWrapper"
         });
+
+        // Keep module-local headers available to sources under subdirectories such as Tests.
+        PrivateIncludePaths.Add(ModuleDirectory);
 
         if (Target.Platform == UnrealTargetPlatform.Win64)
         {

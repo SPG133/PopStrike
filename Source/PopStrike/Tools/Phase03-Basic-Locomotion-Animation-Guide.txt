@@ -1,0 +1,617 @@
+PopStrike 阶段 03：基础联网角色动画搭建指南
+================================================
+
+适用项目：D:\Unreal Projects\PopStrike
+适用引擎：本机源码版 Unreal Engine 5.8.2
+本阶段范围：Idle、四方向移动、跳起、下落、落地、蹲伏
+本阶段不做：武器分层、瞄准偏移、脚部 IK、转身、跨栏、攀爬、Motion Matching
+
+
+一、这套方案采用什么成熟经验
+--------------------------------
+
+这套实现采用成熟联网角色系统普遍使用的职责分离：
+
+1. CharacterMovementComponent（CMC）负责真实位置、速度、跳跃、蹲伏、碰撞和网络移动。
+2. Character/PlayerController 负责玩法输入和是否允许移动。
+3. AnimInstance 只采样 Character/CMC 已经确定的状态。
+4. Animation Blueprint 只负责选择姿势、混合和播放表现。
+5. 普通移动使用 In-Place 动画；一次性特殊移动才考虑 Root Motion Montage。
+6. 不用 Anim Notify 决定角色已经落地、已经爬上平台或已经移动到某处。
+7. 不用客户端 Timeline/SetActorLocation 驱动联网角色移动。
+
+这和 Epic 官方 Lyra 的核心边界相同：玩法状态提供事实，AnimBP 消费数据并负责表现。
+PopStrike 当前只有六人，不照搬 Lyra 的完整 Linked Anim Layer、Chooser、Motion Matching
+和大型数据体系。先用一个小型状态机建立稳定基线，再按真实需求扩展。
+
+参考资料：
+
+- Lyra 动画架构：
+  https://dev.epicgames.com/documentation/en-us/unreal-engine/animation-in-lyra-sample-game-in-unreal-engine
+- UE 5.8 CMC 联网移动：
+  https://dev.epicgames.com/documentation/en-us/unreal-engine/understanding-networked-movement-in-the-character-movement-component-for-unreal-engine
+- Animation Montage：
+  https://dev.epicgames.com/documentation/en-us/unreal-engine/animation-montage-in-unreal-engine
+- Motion Warping（以后跨栏/攀爬使用）：
+  https://dev.epicgames.com/documentation/en-us/unreal-engine/motion-warping-in-unreal-engine
+
+
+二、本阶段最终数据流
+--------------------
+
+玩家输入
+  -> APSMatchPlayerController
+  -> APSFPSCharacter / CharacterMovementComponent
+  -> CMC 产生真实 Velocity、MovementMode、bIsCrouched
+  -> UPSAnimInstance 每帧读取这些结果
+  -> ABP_FPSCharacter 根据变量选择动画
+  -> 其他客户端也根据已复制的角色移动状态播放相同类型动画
+
+基础移动不增加动画 RPC，也不复制 Speed、ForwardSpeed、RightSpeed。
+这些值由每台机器从已经同步的 Character 状态计算，避免重复网络数据。
+
+
+三、当前项目中已经存在的文件
+----------------------------
+
+1. C++ AnimInstance：
+
+磁盘：
+D:\Unreal Projects\PopStrike\Source\PopStrike\PSAnimInstance.h
+D:\Unreal Projects\PopStrike\Source\PopStrike\PSAnimInstance.cpp
+
+当前类：UPSAnimInstance
+
+当前已有变量：
+- Speed
+- ForwardSpeed
+- RightSpeed
+- bMoving
+- bFalling
+- bCrouching
+- bDead
+
+2. C++ Character：
+
+磁盘：
+D:\Unreal Projects\PopStrike\Source\PopStrike\PSFPSCharacter.h
+D:\Unreal Projects\PopStrike\Source\PopStrike\PSFPSCharacter.cpp
+
+当前类：APSFPSCharacter
+
+当前关键设置：
+- Capsule：半径 34，高度 90
+- MaxWalkSpeed：450
+- MaxWalkSpeedCrouched：200
+- bUseControllerRotationYaw：true
+- bOrientRotationToMovement：false
+
+这表示当前角色属于“面向视角、四方向平移”的 FPS/竞技射击移动方式，应该使用
+ForwardSpeed + RightSpeed 的二维 Blend Space，而不是只根据总 Speed 播放前进动画。
+
+3. 角色蓝图：
+
+磁盘：
+D:\Unreal Projects\PopStrike\Content\PopStrike\Blueprints\BP_FPSCharacter.uasset
+
+Content Browser：
+/Game/PopStrike/Blueprints/BP_FPSCharacter
+
+4. 当前动画蓝图：
+
+磁盘：
+D:\Unreal Projects\PopStrike\Content\PopStrike\Animations\ABP_FPSCharacter.uasset
+
+Content Browser：
+/Game/PopStrike/Animations/ABP_FPSCharacter
+
+必须复用这个 AnimBP，不再创建 ABP_PS_Character 等平行系统。
+
+5. Manny Mesh 和 Skeleton：
+
+Skeletal Mesh：
+/Game/Characters/Heroes/Mannequin/Meshes/SKM_Manny
+
+Skeleton：
+/Game/Characters/Heroes/Mannequin/Meshes/SK_Mannequin
+
+磁盘目录：
+D:\Unreal Projects\PopStrike\Content\Characters\Heroes\Mannequin\Meshes
+
+
+四、本阶段使用的现有动画资产
+----------------------------
+
+以下资产都位于：
+
+Content Browser：
+/Game/Characters/Heroes/Mannequin/Animations/Locomotion/Unarmed
+
+磁盘：
+D:\Unreal Projects\PopStrike\Content\Characters\Heroes\Mannequin\Animations\Locomotion\Unarmed
+
+站立：
+MM_Unarmed_Idle_Ready
+
+站立移动：
+MM_Unarmed_Jog_Fwd
+MM_Unarmed_Jog_Bwd
+MM_Unarmed_Jog_Left
+MM_Unarmed_Jog_Right
+
+跳跃：
+MM_Unarmed_Jump_Start
+MM_Unarmed_Jump_Fall_Loop
+MM_Unarmed_Jump_Fall_Land
+
+蹲伏：
+MM_Unarmed_Crouch_Idle
+MM_Unarmed_Crouch_Walk_Fwd
+MM_Unarmed_Crouch_Walk_Bwd
+MM_Unarmed_Crouch_Walk_Left
+MM_Unarmed_Crouch_Walk_Right
+
+“MM”表示 Manny Male 动画。如果 BP_FPSCharacter 使用 Quinn 或其他骨架，先停止，
+改用对应的 MF 动画或完成 Retarget，不能直接混搭骨架。
+
+
+五、第一步：验证 Mesh、Skeleton 和 AnimBP
+---------------------------------------
+
+1. 打开：
+   /Game/PopStrike/Blueprints/BP_FPSCharacter
+
+2. 在 Components 面板选择：
+   Mesh (CharacterMesh0)
+
+3. 在 Details 中确认：
+   Skeletal Mesh Asset = /Game/Characters/Heroes/Mannequin/Meshes/SKM_Manny
+
+4. 确认：
+   Animation Mode = Use Animation Blueprint
+   Anim Class = /Game/PopStrike/Animations/ABP_FPSCharacter
+
+5. 打开：
+   /Game/PopStrike/Animations/ABP_FPSCharacter
+
+6. 点击 Class Settings，确认：
+   Parent Class = PSAnimInstance
+
+如果 Parent Class 是普通 AnimInstance，改成 PSAnimInstance，然后 Compile、Save。
+
+7. 分别打开一段 MM_Unarmed 动画，确认预览没有 T Pose、骨骼扭曲或比例错误。
+
+验收：BP_FPSCharacter 的 Mesh、ABP_FPSCharacter、所有 MM 动画使用兼容 Skeleton。
+
+
+六、第二步：给 C++ 增加垂直速度
+--------------------------------
+
+为什么需要：当前 bFalling 只能说明角色离地，不能区分向上跳和向下落。
+
+文件：
+D:\Unreal Projects\PopStrike\Source\PopStrike\PSAnimInstance.h
+
+在其他 Locomotion 变量附近增加：
+
+UPROPERTY(BlueprintReadOnly, Category="Locomotion")
+float VerticalSpeed = 0.f;
+
+文件：
+D:\Unreal Projects\PopStrike\Source\PopStrike\PSAnimInstance.cpp
+
+在 NativeUpdateAnimation 中，读取角色速度后增加：
+
+VerticalSpeed = Character->GetVelocity().Z;
+
+最终含义：
+- VerticalSpeed > 0：角色向上
+- VerticalSpeed 接近 0：到达跳跃最高点
+- VerticalSpeed < 0：角色下落
+
+只增加这一个变量。暂时不要添加复杂的 Acceleration、Lean、FootIK 数据。
+
+关闭 Unreal Editor 后编译：
+
+& "D:\UnrealEngine-release\Engine\Build\BatchFiles\Build.bat" `
+  PopStrikeEditor Win64 Development `
+  "-Project=D:\Unreal Projects\PopStrike\PopStrike.uproject" `
+  -Module=PopStrike -WaitMutex -NoHotReloadFromIDE
+
+验收：重新打开 ABP_FPSCharacter，可以搜索并读取 VerticalSpeed。
+
+
+七、第三步：创建站立移动 Blend Space
+------------------------------------
+
+新建目录：
+
+Content Browser：
+/Game/PopStrike/Animations/Locomotion
+
+对应磁盘：
+D:\Unreal Projects\PopStrike\Content\PopStrike\Animations\Locomotion
+
+在该目录右键：
+Animation -> Blend Space
+
+Skeleton 选择：
+/Game/Characters/Heroes/Mannequin/Meshes/SK_Mannequin
+
+资产名称：
+BS_PS_Unarmed_Locomotion
+
+最终路径：
+/Game/PopStrike/Animations/Locomotion/BS_PS_Unarmed_Locomotion
+
+轴设置：
+
+Horizontal Axis Name = RightSpeed
+Minimum Axis Value = -450
+Maximum Axis Value = 450
+Grid Divisions = 4（或保持默认）
+
+Vertical Axis Name = ForwardSpeed
+Minimum Axis Value = -450
+Maximum Axis Value = 450
+Grid Divisions = 4（或保持默认）
+
+采样点：
+
+RightSpeed=0，ForwardSpeed=0
+  -> MM_Unarmed_Idle_Ready
+
+RightSpeed=0，ForwardSpeed=450
+  -> MM_Unarmed_Jog_Fwd
+
+RightSpeed=0，ForwardSpeed=-450
+  -> MM_Unarmed_Jog_Bwd
+
+RightSpeed=-450，ForwardSpeed=0
+  -> MM_Unarmed_Jog_Left
+
+RightSpeed=450，ForwardSpeed=0
+  -> MM_Unarmed_Jog_Right
+
+第一版不需要强行填写四个角。Blend Space 会在相邻样本之间混合。
+预览时拖动绿色采样点，确认中心为 Idle，四个方向正确，没有方向反转。
+
+推荐：Target Weight Interpolation Speed Per Sec 先设为 5.0。
+如果方向变化太软再提高，如果抖动则降低。
+
+验收：在 Blend Space 预览面板拖到上下左右时，角色播放对应方向动画。
+
+
+八、第四步：创建蹲伏 Blend Space
+--------------------------------
+
+仍在：
+/Game/PopStrike/Animations/Locomotion
+
+创建 Blend Space，Skeleton 仍选择：
+/Game/Characters/Heroes/Mannequin/Meshes/SK_Mannequin
+
+名称：
+BS_PS_Unarmed_Crouch
+
+最终路径：
+/Game/PopStrike/Animations/Locomotion/BS_PS_Unarmed_Crouch
+
+轴设置必须匹配 C++ 的 MaxWalkSpeedCrouched=200：
+
+Horizontal Axis Name = RightSpeed
+Minimum Axis Value = -200
+Maximum Axis Value = 200
+
+Vertical Axis Name = ForwardSpeed
+Minimum Axis Value = -200
+Maximum Axis Value = 200
+
+采样点：
+
+0, 0
+  -> MM_Unarmed_Crouch_Idle
+
+0, 200
+  -> MM_Unarmed_Crouch_Walk_Fwd
+
+0, -200
+  -> MM_Unarmed_Crouch_Walk_Bwd
+
+-200, 0
+  -> MM_Unarmed_Crouch_Walk_Left
+
+200, 0
+  -> MM_Unarmed_Crouch_Walk_Right
+
+验收：中心静止，四个方向正确；不要用 450 作为蹲伏轴范围，否则动画权重偏低。
+
+
+九、第五步：建立 ABP_FPSCharacter 状态机
+---------------------------------------
+
+打开：
+/Game/PopStrike/Animations/ABP_FPSCharacter
+
+进入：AnimGraph
+
+创建或复用状态机，名称：
+Locomotion
+
+最小状态：
+
+1. Grounded
+2. Crouched
+3. JumpStart
+4. Falling
+5. Landing
+
+不要创建 Idle 和 Move 两个独立状态。站立与移动已经由同一个 Blend Space 连续处理，
+这样状态更少，也不会在低速时频繁切换。
+
+状态 Grounded：
+- 放入 BS_PS_Unarmed_Locomotion
+- ForwardSpeed 接 Blend Space 的 ForwardSpeed
+- RightSpeed 接 Blend Space 的 RightSpeed
+
+状态 Crouched：
+- 放入 BS_PS_Unarmed_Crouch
+- ForwardSpeed 接 ForwardSpeed
+- RightSpeed 接 RightSpeed
+
+状态 JumpStart：
+- 播放 MM_Unarmed_Jump_Start
+- Loop Animation = false
+
+状态 Falling：
+- 播放 MM_Unarmed_Jump_Fall_Loop
+- Loop Animation = true
+
+状态 Landing：
+- 播放 MM_Unarmed_Jump_Fall_Land
+- Loop Animation = false
+
+注意：先在资产编辑器预览 MM_Unarmed_Jump_Fall_Land。如果它包含很长的空中段落，
+第一版可以缩短状态播放区间，或者临时从 Falling 直接混回 Grounded；不要让角色落地后
+长时间继续保持空中姿势。后续可复制原始动画到 /Game/PopStrike/Animations/Locomotion
+再裁剪，避免直接改 Epic 原始资产。
+
+
+十、第六步：设置状态转换规则
+--------------------------------
+
+Entry -> Grounded
+
+Grounded -> Crouched：
+bCrouching == true AND bFalling == false
+Blend Duration = 0.15
+
+Crouched -> Grounded：
+bCrouching == false AND bFalling == false
+Blend Duration = 0.15
+
+Grounded -> JumpStart：
+bFalling == true AND VerticalSpeed > 0
+Blend Duration = 0.08
+
+Crouched -> JumpStart：
+仅当你允许蹲伏状态跳跃时建立：
+bFalling == true AND VerticalSpeed > 0
+
+JumpStart -> Falling：
+VerticalSpeed <= 0
+OR
+JumpStart 动画的 Time Remaining Ratio < 0.1
+
+Falling -> Landing：
+bFalling == false
+Blend Duration = 0.05
+
+Landing -> Grounded：
+Time Remaining Ratio < 0.1 AND bCrouching == false
+
+Landing -> Crouched：
+Time Remaining Ratio < 0.1 AND bCrouching == true
+
+不要让 Anim Notify 修改 bFalling。bFalling 必须始终来自 CharacterMovementComponent。
+
+
+十一、第七步：配置 AnimGraph 最终输出
+-----------------------------------
+
+基础版连接：
+
+Locomotion State Machine
+  -> Slot（名称 FullBody）
+  -> Output Pose
+
+如果项目中没有 FullBody Slot：
+
+1. 打开 Skeleton：
+   /Game/Characters/Heroes/Mannequin/Meshes/SK_Mannequin
+2. 打开 Anim Slot Manager。
+3. 保留 DefaultGroup。
+4. 新增 Slot：FullBody。
+
+现在添加 Slot 是为了以后 Vault/Mantle Montage 直接覆盖全身姿势，不需要重做 AnimGraph。
+
+在 ABP_FPSCharacter 的 Class Defaults 中设置：
+
+Root Motion Mode = Root Motion from Montages Only
+
+不要设置 Root Motion from Everything。普通移动由 CMC 驱动；以后只有跨栏、攀爬等
+特殊 Montage 使用 Root Motion。
+
+
+十二、第八步：编译并绑定到角色
+--------------------------------
+
+1. 在 ABP_FPSCharacter 点击 Compile、Save。
+2. 打开 /Game/PopStrike/Blueprints/BP_FPSCharacter。
+3. 选择 Mesh (CharacterMesh0)。
+4. 确认：
+   Animation Mode = Use Animation Blueprint
+   Anim Class = ABP_FPSCharacter
+5. Compile、Save。
+
+重要：PSFPSCharacter.cpp 当前设置 GetMesh()->SetOwnerNoSee(true)。
+因此本地第一人称玩家默认看不到自己的第三人称身体，这是正常的。
+基础动画最好用以下方式观察：
+
+- PIE 开两个玩家，从另一个客户端观察角色；或
+- 编辑器 Debug Filter 选择正在运行的远端 Character；或
+- 只在临时调试时关闭 Owner No See，验证后恢复。
+
+不要因为本地看不到身体就判断 AnimBP 没运行。
+
+
+十三、第一轮验收清单（单进程）
+--------------------------------
+
+在 L_JuiceFactory 测试：
+
+1. 静止：播放 Idle，无 T Pose。
+2. W：播放前进。
+3. S：播放后退。
+4. A：播放左移。
+5. D：播放右移。
+6. W+A/W+D：两个相邻样本平滑混合。
+7. 松开输入：回到 Idle，不反复抖动。
+8. 跳跃：JumpStart -> Falling -> Landing -> Grounded。
+9. 短跳和高处落下都不会卡在 JumpStart。
+10. 蹲伏静止：Crouch Idle。
+11. 蹲伏移动：对应方向 Crouch Walk。
+12. 起身：回到 Grounded。
+13. Freeze 阶段禁用移动时，角色最终回到合理静止姿势。
+
+在 AnimBP 调试器观察：
+
+- Speed
+- ForwardSpeed
+- RightSpeed
+- VerticalSpeed
+- bFalling
+- bCrouching
+- 当前激活状态
+
+
+十四、第二轮验收清单（联网）
+--------------------------------
+
+正式结论至少使用 Dedicated Server + 两个客户端；条件暂不具备时可以先用 PIE 两玩家。
+
+客户端 A 操作，客户端 B 观察：
+
+1. A 前后左右移动，B 看到正确方向动画。
+2. A 跳跃，B 不长期卡在 Falling。
+3. A 蹲伏，B 的胶囊高度和动画一致。
+4. A 快速切换方向，B 不出现持续滑步或 T Pose。
+5. 不需要为基础动画添加 Server/Multicast RPC。
+6. 模拟延迟后，动画可以有轻微平滑延迟，但位置不能被动画拖离胶囊。
+
+如果基础移动动画需要额外 RPC 才能同步，先检查 AnimBP 是否读取了 CMC/Character 状态，
+不要直接增加动画广播 RPC。
+
+
+十五、常见错误与定位
+--------------------
+
+问题：角色一直 T Pose
+检查：BP_FPSCharacter 的 Anim Class、ABP Skeleton、ABP 是否编译成功。
+
+问题：W 播放后退动画
+检查：Blend Space 的 Vertical Axis 正负方向是否放反。
+
+问题：A/D 放反
+检查：RightSpeed 轴和 Left/Right 样本位置。
+
+问题：角色移动但动画仍 Idle
+检查：ABP Parent Class 是否为 PSAnimInstance；运行时 Debug Filter 是否选对实例。
+
+问题：跳起来一直保持 JumpStart
+检查：是否已经添加 VerticalSpeed；JumpStart -> Falling 是否允许 Time Remaining 兜底。
+
+问题：落地后卡住
+检查：Landing 动画 Loop 必须关闭；Landing 出口使用 Time Remaining Ratio。
+
+问题：模型移动方向正确但脚底滑动
+第一阶段允许少量滑步。先确认 MaxWalkSpeed=450 和动画节奏大致匹配，后续再加入
+Stride Warping/Distance Matching；不要为了脚步完全贴合修改真实网络移动速度。
+
+问题：本地看不到角色动画
+原因：当前世界 Mesh 设置了 Owner No See；使用第二客户端观察。
+
+问题：胶囊移动但 Mesh 离开胶囊
+检查：普通动画不要启用 Root Motion；AnimBP 使用 Root Motion from Montages Only。
+
+
+十六、本阶段不要做的事情
+------------------------
+
+1. 不新建第二个角色移动组件。
+2. 不在 AnimBP Tick 中做射线检测。
+3. 不用 Anim Notify 修改角色位置、落地状态或网络权威状态。
+4. 不为 Idle/Run/Jump 分别发送 RPC。
+5. 不在蓝图中每帧 SetActorLocation。
+6. 不一次引入完整 Lyra 动画框架。
+7. 不立即引入 Motion Matching。
+8. 不直接修改 /Game/Characters 下的大量原始动画。
+9. 不在基础状态未通过前加入武器上半身、Aim Offset 和 Foot IK。
+
+
+十七、进入攀爬阶段的门槛
+------------------------
+
+必须先满足：
+
+- 单客户端全部基础状态正确。
+- 第二客户端能看到正确的移动、跳跃、蹲伏动画。
+- 动画不会改变角色权威碰撞位置。
+- 没有长期卡状态。
+- ABP_FPSCharacter 是唯一主 AnimBP。
+
+通过后再开始 Traversal：
+
+1. C++检测前方障碍、顶部和目标胶囊空间。
+2. 按高度分为 Vault、Mantle、Reject。
+3. 服务器从权威位置重新验证。
+4. Vault/Mantle 使用 Root Motion Montage。
+5. 使用 Motion Warping 对齐真实障碍目标。
+6. 动作状态包含类型、序号、服务器起始时间、目标 Transform。
+7. 攀爬期间禁止普通移动、开火和换弹。
+8. 动作完成后恢复 CMC Walking。
+
+
+十八、本阶段实际会修改或创建的文件汇总
+--------------------------------------
+
+修改 C++：
+D:\Unreal Projects\PopStrike\Source\PopStrike\PSAnimInstance.h
+D:\Unreal Projects\PopStrike\Source\PopStrike\PSAnimInstance.cpp
+
+修改现有资产：
+/Game/PopStrike/Animations/ABP_FPSCharacter
+/Game/PopStrike/Blueprints/BP_FPSCharacter（仅检查/修正 Anim Class 时）
+
+新建资产：
+/Game/PopStrike/Animations/Locomotion/BS_PS_Unarmed_Locomotion
+/Game/PopStrike/Animations/Locomotion/BS_PS_Unarmed_Crouch
+
+只读复用的原始资产：
+/Game/Characters/Heroes/Mannequin/Animations/Locomotion/Unarmed/MM_Unarmed_*
+/Game/Characters/Heroes/Mannequin/Meshes/SKM_Manny
+/Game/Characters/Heroes/Mannequin/Meshes/SK_Mannequin
+
+
+建议实际执行顺序
+----------------
+
+第 1 次：只完成 Mesh/Skeleton/AnimBP父类核对。
+第 2 次：增加 VerticalSpeed 并完成编译。
+第 3 次：只创建并预览两个 Blend Space。
+第 4 次：只建立 Grounded/Crouched，验证地面移动。
+第 5 次：加入 JumpStart/Falling/Landing。
+第 6 次：双客户端观察远端动画。
+第 7 次：基础验收通过后，再开始 Vault/Mantle。
+
+每次只增加一个可验证增量。上一增量没有通过时，不继续堆叠下一层功能。

@@ -2,6 +2,12 @@
 
 #include "PSMatchGameState.h"
 #include "PSMatchPlayerState.h"
+#include "PSFPSCharacter.h"
+#include "PSMatchPlayerController.h"
+#include "Engine/PlayerStartPIE.h"
+#include "Engine/World.h"
+#include "EngineUtils.h"
+#include "GameFramework/PlayerStart.h"
 #include "Kismet/GameplayStatics.h"
 #include "TimerManager.h"
 
@@ -23,12 +29,21 @@ namespace
     {
         return FMath::Max(Duration, UE_KINDA_SMALL_NUMBER);
     }
+
+    FName StartTagForTeam(EPSLobbyTeam Team)
+    {
+        if (Team == EPSLobbyTeam::A) return TEXT("TeamA");
+        if (Team == EPSLobbyTeam::B) return TEXT("TeamB");
+        return NAME_None;
+    }
 }
 
 APSMatchGameMode::APSMatchGameMode()
 {
     GameStateClass = APSMatchGameState::StaticClass();
     PlayerStateClass = APSMatchPlayerState::StaticClass();
+    DefaultPawnClass = APSFPSCharacter::StaticClass();
+    PlayerControllerClass = APSMatchPlayerController::StaticClass();
 }
 
 void APSMatchGameMode::InitGame(
@@ -41,8 +56,67 @@ void APSMatchGameMode::InitGame(
 
 void APSMatchGameMode::HandleStartingNewPlayer_Implementation(APlayerController* NewPlayer)
 {
+    // Seamless travel already copied the lobby team. Only assign direct entrants.
+    if (auto* Player = NewPlayer->GetPlayerState<APSMatchPlayerState>(); Player && Player->Team == EPSLobbyTeam::None)
+    {
+        int32 TeamA = 0, TeamB = 0;
+        for (const TObjectPtr<APlayerState>& Other : GameState->PlayerArray)
+        {
+            if (const auto* MatchPlayer = Cast<APSMatchPlayerState>(Other.Get()))
+            {
+                TeamA += MatchPlayer->Team == EPSLobbyTeam::A;
+                TeamB += MatchPlayer->Team == EPSLobbyTeam::B;
+            }
+        }
+        Player->Team = TeamA <= TeamB ? EPSLobbyTeam::A : EPSLobbyTeam::B;
+    }
     Super::HandleStartingNewPlayer_Implementation(NewPlayer);
     TryStartMatch();
+}
+
+AActor* APSMatchGameMode::ChoosePlayerStart_Implementation(AController* Player)
+{
+    const FName RequiredTag = StartTagForTeam(GetTeam(Player));
+    if (RequiredTag.IsNone()) return Super::ChoosePlayerStart_Implementation(Player);
+
+    UWorld* World = GetWorld();
+    UClass* PawnClass = GetDefaultPawnClassForController(Player);
+    APawn* PawnToFit = PawnClass ? PawnClass->GetDefaultObject<APawn>() : nullptr;
+    TArray<APlayerStart*> UnoccupiedStarts;
+    TArray<APlayerStart*> OccupiedStarts;
+
+    for (TActorIterator<APlayerStart> It(World); It; ++It)
+    {
+        APlayerStart* Start = *It;
+        if (Start->IsA<APlayerStartPIE>()) return Start;
+        if (Start->PlayerStartTag != RequiredTag) continue;
+
+        FVector Location = Start->GetActorLocation();
+        const FRotator Rotation = Start->GetActorRotation();
+        if (!World->EncroachingBlockingGeometry(PawnToFit, Location, Rotation))
+        {
+            UnoccupiedStarts.Add(Start);
+        }
+        else if (World->FindTeleportSpot(PawnToFit, Location, Rotation))
+        {
+            OccupiedStarts.Add(Start);
+        }
+    }
+
+    if (!UnoccupiedStarts.IsEmpty())
+        return UnoccupiedStarts[FMath::RandHelper(UnoccupiedStarts.Num())];
+    if (!OccupiedStarts.IsEmpty())
+        return OccupiedStarts[FMath::RandHelper(OccupiedStarts.Num())];
+
+    return Super::ChoosePlayerStart_Implementation(Player);
+}
+
+void APSMatchGameMode::PreLogin(const FString& Options, const FString& Address,
+    const FUniqueNetIdRepl& UniqueId, FString& ErrorMessage)
+{
+    Super::PreLogin(Options, Address, UniqueId, ErrorMessage);
+    if (ErrorMessage.IsEmpty() && GameState && GameState->PlayerArray.Num() >= 6)
+        ErrorMessage = TEXT("Match is full.");
 }
 
 void APSMatchGameMode::Logout(AController* Exiting)
@@ -103,6 +177,19 @@ void APSMatchGameMode::EnterFreeze()
         ? DecidingRoundFreezeDuration
         : FreezeDuration;
     SetPhase(EPSMatchPhase::Freeze, CurrentFreezeDuration);
+    // A fresh Pawn gives every round a separate lifetime for input and shot sequences.
+    for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+    {
+        APlayerController* Player = It->Get();
+        if (!Player) continue;
+        if (APawn* OldPawn = Player->GetPawn())
+        {
+            if (State->MatchState.RoundNumber == 1) continue;
+            Player->UnPossess();
+            OldPawn->Destroy();
+        }
+        RestartPlayer(Player);
+    }
     GetWorldTimerManager().SetTimer(
         PhaseTimer, this, &ThisClass::EnterLive, SafeDuration(CurrentFreezeDuration), false);
 }

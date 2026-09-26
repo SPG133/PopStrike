@@ -24,7 +24,10 @@ public:
 
     virtual void InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage) override;
     virtual void HandleStartingNewPlayer_Implementation(APlayerController* NewPlayer) override;
+    virtual AActor* ChoosePlayerStart_Implementation(AController* Player) override;
     virtual void Logout(AController* Exiting) override;
+    virtual void PreLogin(const FString& Options, const FString& Address,
+        const FUniqueNetIdRepl& UniqueId, FString& ErrorMessage) override;
 
     UFUNCTION(BlueprintCallable, Category="Match|Objective")
     void PlantBomb(AController* Planter);
