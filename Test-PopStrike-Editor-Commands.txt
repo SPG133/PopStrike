@@ -1,0 +1,8 @@
+$EditorExe = 'D:\UnrealEngine-release\Engine\Binaries\Win64\UnrealEditor.exe'
+$ProjectFile = 'D:\Unreal Projects\PopStrike\PopStrike.uproject'
+
+# Dedicated Server (run in the first PowerShell window)
+& $EditorExe $ProjectFile '/Game/Maps/Level_1/L_Lobby' -server -log -port=7777 -NoLiveCoding
+
+# Client (run in another PowerShell window after the server is ready)
+& $EditorExe $ProjectFile '127.0.0.1:7777' -game -log -windowed -ResX=1280 -ResY=720 -NoLiveCoding

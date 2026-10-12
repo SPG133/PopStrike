@@ -1,0 +1,338 @@
+﻿PopStrike 真正战斗关卡搭建指南
+================================
+
+适用地图：Content/Maps/Level_3/Juice_Factory/L_JuiceFactory
+原则：每次只完成一个可验证增量。上一阶段未通过，不进入下一阶段。
+
+
+一、当前已有基础
+----------------
+
+当前项目已有：
+
+1. APSMatchGameMode：回合阶段、计分、攻防交换。
+2. APSFPSCharacter：移动、蹲伏、跳跃和生命值。
+3. APSMatchPlayerController：Enhanced Input 输入。
+4. UPSCombatComponent：开火、换弹和弹药复制。
+5. APSWeapon、PSWeaponDefinition：武器实例和静态配置。
+6. BP_MatchGameMode、BP_FPSCharacter、BP_MatchPlayerController。
+7. ABP_FPSCharacter。
+8. 战斗地图 L_JuiceFactory。
+
+这些类和资产存在不代表战斗关卡已经连通，仍要按以下顺序逐项配置和验证。
+
+
+二、先修复当前“15 秒后穿模掉落”的问题
+--------------------------------------
+
+现象原因：
+
+冻结阶段内，APSFPSCharacter::CanMove() 返回 false，CharacterMovement 被设置为 MOVE_None，
+因此角色暂时不会受重力影响。15 秒后比赛进入 Live，代码恢复 MOVE_Walking，重力开始生效。
+如果出生点下面的地图地面没有有效碰撞，或者没有阻挡 Pawn，角色就会穿过地面并一直下落。
+
+这通常不是角色 Mesh 的问题。角色真正用于移动碰撞的是 CapsuleComponent；C++ 中把第三人称
+Mesh 设置为 NoCollision 是正常做法。
+
+按以下顺序检查：
+
+步骤 1：用临时方块确认是不是地面碰撞
+
+1. 打开 L_JuiceFactory。
+2. 在 PlayerStart 正下方放置一个 Engine Basic Cube。
+3. 把 Cube 放大成明显的平台，例如 Scale X=5、Y=5、Z=0.2。
+4. 在 Cube 的 Details -> Collision 中设置 Collision Presets = BlockAll。
+5. 把 PlayerStart 放在 Cube 上方，确保胶囊没有嵌入平台。
+6. PIE 运行并等待 15 秒。
+
+预期结果：
+
+- 如果角色站在 Cube 上不再掉落，说明角色代码和胶囊基本正常，原始地图地面没有有效碰撞。
+- 如果角色仍穿过 Cube，再检查 BP_FPSCharacter 的 CapsuleComponent。
+
+步骤 2：检查角色胶囊
+
+打开 BP_FPSCharacter，选择 CapsuleComponent，确认：
+
+- Collision Enabled = Query and Physics。
+- Collision Presets = Pawn。
+- Object Type = Pawn。
+- 对 WorldStatic 的响应 = Block。
+- 不要在蓝图 Construction Script 或 BeginPlay 中关闭 Capsule 碰撞。
+
+不要把角色 Skeletal Mesh 改成 BlockAll 来代替胶囊。CharacterMovement 依赖胶囊体移动。
+
+步骤 3：检查地图地面碰撞
+
+在 L_JuiceFactory 中选中出生点下方的地面 Actor：
+
+1. Details -> Collision Presets 设置为 BlockAll，或者自定义为至少阻挡 Pawn 和 Visibility。
+2. 双击它使用的 Static Mesh，进入 Static Mesh Editor。
+3. 打开 Collision -> Simple Collision 显示，检查是否真的存在碰撞体。
+4. 如果完全没有简单碰撞，优先选择下面两种方案之一。
+
+方案 A（推荐用于规则地板）：
+
+- 在关卡里使用 Blocking Volume 覆盖可行走地面、墙壁和地图边界。
+- 地面 Blocking Volume 阻挡 Pawn 和 Visibility。
+- 这种方案清晰、容易调试，适合第一版联机地图。
+
+方案 B（适合静态且形状复杂的单块场景网格）：
+
+- Static Mesh Editor -> Collision Complexity -> Use Complex Collision As Simple。
+- 只能把它作为静态环境碰撞，不要用于需要模拟物理的移动物体。
+- 如果整张工厂是非常复杂的巨大网格，不要未经性能验证就全部使用复杂碰撞；优先用 Blocking Volume。
+
+步骤 4：显示碰撞进行验证
+
+PIE 时打开控制台，输入：
+
+show collision
+
+确认角色胶囊和地面阻挡体确实接触。还要检查 PlayerStart 是否出现 BADsize 提示；出现时说明出生
+胶囊与场景碰撞重叠，应向上或向空旷处移动 PlayerStart。
+
+当前问题的验收条件：
+
+- 等待冻结阶段结束后角色不会掉穿地面。
+- 角色能在地板、斜坡和楼梯上正常移动。
+- 角色不能穿墙或走出地图边界。
+- 两名玩家的服务器端和客户端结果一致。
+
+
+三、配置战斗地图 GameMode
+------------------------
+
+1. 打开 L_JuiceFactory。
+2. 打开 World Settings。
+3. 把 GameMode Override 设置为 BP_MatchGameMode。
+4. 打开 BP_MatchGameMode，确认 Parent Class = PSMatchGameMode。
+5. 确认 Default Pawn Class = BP_FPSCharacter。
+6. 确认 Player Controller Class = BP_MatchPlayerController。
+7. GameStateClass 和 PlayerStateClass 可以使用 C++ 构造函数中设置的继承值。
+
+开发期间可以在 BP_MatchGameMode 中把 Freeze Duration 暂时设置为 1 秒，以缩短测试时间。
+正式规则确认后再恢复 15 秒。
+
+
+四、建立最小出生点
+------------------
+
+1. 先在地图中放两个普通 PlayerStart。
+2. 放在已经确认有碰撞的安全地面上。
+3. 出生点胶囊不能嵌入地面、墙壁或道具。
+4. 调整箭头方向，让出生后的玩家朝向地图内部。
+5. 两个出生点不要直接互相看见。
+
+当前 APSMatchGameMode 尚未按 TeamA/TeamB 标签选择出生点。因此第一轮只验证普通出生，暂时不要
+认为添加 Actor Tag 就能自动按队伍出生。
+
+
+五、配置角色蓝图
+----------------
+
+打开 Content/PopStrike/Blueprints/BP_FPSCharacter：
+
+1. Parent Class = PSFPSCharacter。
+2. Mesh 设置实际使用的角色 Skeletal Mesh。
+3. Anim Class = ABP_FPSCharacter。
+4. Mesh 的 Owner No See 保持开启。
+5. Mesh 不承担角色移动碰撞，CapsuleComponent 才承担移动碰撞。
+
+当前只有 Camera，没有独立第一人称手臂模型。第一轮先验证网络移动，不要先制作手臂、镜头晃动
+或复杂动画。
+
+
+六、配置输入
+------------
+
+打开 BP_MatchPlayerController，在 Class Defaults 中设置：
+
+Match Mapping = IMC_Match
+Move Action = IA_Move
+Look Action = IA_Look
+Jump Action = IA_Jump
+Crouch Action = IA_Crouch
+Fire Action = IA_Fire
+Reload Action = IA_Reload
+
+打开 IMC_Match，建议按键：
+
+IA_Move：WASD，类型 Axis2D
+IA_Look：Mouse XY，类型 Axis2D
+IA_Jump：Space
+IA_Crouch：Left Ctrl
+IA_Fire：Left Mouse Button
+IA_Reload：R
+
+W 对应 Y=+1，S 对应 Y=-1，A 对应 X=-1，D 对应 X=+1。
+
+
+七、第一次最小联机测试
+----------------------
+
+先直接运行战斗地图，不经过大厅，以排除地图旅行问题。
+
+PIE 设置：
+
+- Number of Players = 2。
+- Net Mode = Play As Listen Server。
+- Run Under One Process 可以暂时开启。
+
+只验收：
+
+1. 两名玩家都生成 BP_FPSCharacter。
+2. 两个窗口能分别控制自己的角色。
+3. WASD、鼠标、跳跃、蹲伏正常。
+4. 客户端能看到另一名玩家平滑移动。
+5. 冻结阶段结束后不会穿过地面。
+6. 服务器和客户端没有关键错误日志。
+
+任一项失败都先修复，不进入武器阶段。
+
+
+八、建立队伍出生
+----------------
+
+基础出生通过后，再放置两组 PlayerStart：
+
+- Team A：3 个，Actor Tag = TeamA。
+- Team B：3 个，Actor Tag = TeamB。
+
+然后在 APSMatchGameMode 中重写 ChoosePlayerStart_Implementation：
+
+1. 服务器读取 APSMatchPlayerState::Team。
+2. 只选择对应标签的 PlayerStart。
+3. 尽量避开已经被其他角色占用的位置。
+4. 找不到对应出生点时回退到 Super::ChoosePlayerStart_Implementation。
+5. 不要在 Level Blueprint 中按玩家编号传送角色。
+
+验收：A/B 队出生正确；新回合创建新 Pawn 后仍正确；六人出生时不会重叠。
+
+
+九、整理地图碰撞
+----------------
+
+逐区域检查：
+
+1. 地板阻挡 Pawn。
+2. 墙壁阻挡 Pawn 和 Visibility。
+3. 装饰性小物件不要随意阻挡玩家。
+4. 玻璃是否阻挡子弹必须明确配置。
+5. 地图外围增加 Blocking Volume，避免玩家离开地图。
+6. 楼梯和斜坡使用稳定、简单的碰撞形状。
+
+当前射线武器需要墙体阻挡 Visibility；否则即使玩家不能穿墙，也可能出现子弹穿墙命中。
+
+
+十、接通第一把武器
+------------------
+
+在 BP_FPSCharacter 的 Combat -> Starting Weapon 中设置一个实际的 PSWeaponDefinition 数据资产。
+
+第一把枪只做步枪，建议初始参数：
+
+Weapon Class = PSWeapon 或其蓝图子类
+Magazine Size = 30
+Starting Reserve = 90
+Fire Interval = 0.1
+Reload Duration = 2.33
+Damage = 25
+Range = 15000
+Hand Socket = hand_r
+Muzzle Socket = Muzzle
+
+先验证：服务器扣弹、命中扣血、队友免伤、换弹一致、射速校验、客户端与服务器弹药最终一致。
+
+不要直接依赖 Content/Weapons 中的 GA_Weapon_*。它们可能属于 GAS/Lyra 体系，而当前项目已经有
+PSCombatComponent，应先完成现有小型武器闭环。
+
+
+十一、战斗 HUD
+--------------
+
+创建或整理 WBP_CombatHUD，并在 BP_MatchPlayerController 的 Combat HUD Class 中设置。
+
+第一版只显示：
+
+- Health。
+- Magazine / Reserve。
+- Round Number。
+- Team A / Team B Score。
+- Current Phase。
+- Phase Remaining Time。
+
+数据来源：生命值来自 PSFPSCharacter；弹药来自 PSCombatComponent；比分和阶段来自
+PSMatchGameState；队伍来自 PSMatchPlayerState。Widget 只显示复制状态，不自行保存权威比分或时间。
+
+
+十二、补齐死亡和回合结束
+------------------------
+
+当前生命值降为零后会禁用移动和战斗，但还需要补齐：
+
+1. 服务器处理死亡结果。
+2. GameMode 统计双方存活人数。
+3. 一方无人存活时结束回合。
+4. 进入 RoundEnd 并更新比分。
+5. 新回合销毁旧 Pawn。
+6. RestartPlayer 生成新 Pawn。
+7. 恢复生命、弹药和正确出生点。
+
+先完成团灭结束回合，再制作尸体、观战和死亡动画。
+
+
+十三、炸弹目标
+--------------
+
+PlantBomb、StartDefuse、CancelDefuse 目前只是服务器回合规则入口，还需要：
+
+1. 炸弹携带状态。
+2. 炸弹区域。
+3. 服务器验证阵营、距离、存活和阶段。
+4. 持续安装，而不是按一下立即安装。
+5. 松键、离开范围或死亡时取消。
+6. 炸弹 Actor 和进度的网络复制。
+7. 使用服务器时间恢复安装和拆除进度。
+
+GameMode 只存在于服务器。客户端输入不能直接把调用 GameMode 蓝图函数当成远程请求，必须经过
+所属 PlayerController 或 Pawn 的 Server RPC，再由服务器校验。
+
+
+十四、恢复大厅到战斗地图流程
+----------------------------
+
+直接运行战斗地图全部通过后，再验证：
+
+主菜单 -> 连接服务器 -> 大厅 -> 选图 -> ServerTravel -> L_JuiceFactory。
+
+检查：
+
+1. 使用 ServerTravel，而不是每个客户端分别 Open Level。
+2. 大厅队伍正确进入 Match PlayerState。
+3. 旅行后大厅 Widget 被移除。
+4. 所有玩家进入同一个地图实例。
+5. ExpectedPlayers 与实际旅行人数一致。
+6. 晚加入和掉线行为明确。
+
+
+十五、动画和战争迷雾
+--------------------
+
+最后的正确顺序：
+
+联网移动 -> 队伍出生 -> 地图碰撞 -> 武器闭环 -> 死亡和回合 -> 炸弹目标 -> 动画表现 -> 战争迷雾。
+
+动画只表现状态，不能决定伤害、换弹完成或死亡。战争迷雾必须等网络状态稳定后再做，否则难以区分
+敌人未出现究竟是复制、出生、碰撞还是迷雾过滤问题。
+
+
+当前立即执行顺序
+----------------
+
+1. 在 PlayerStart 下放置 BlockAll Cube。
+2. 等待 15 秒，确认角色是否仍然下落。
+3. 如果不再下落，为原始地图添加正确的 Blocking Volume 或 Static Mesh 碰撞。
+4. 用 show collision 验证角色胶囊与地面阻挡体。
+5. 双人 PIE 验证移动。
+6. 通过后再实现 TeamA/TeamB 出生点选择。

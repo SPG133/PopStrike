@@ -1,0 +1,33 @@
+# Visual Studio
+.vs/
+*.VC.db
+*.VC.opendb
+*.suo
+*.user
+*.userprefs
+
+# Unreal generated
+Binaries/
+DerivedDataCache/
+Intermediate/
+Saved/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local agent settings, generated solutions and asset backups
+.codex/
+*.sln
+*.slnx
+.vsconfig
+Content/**/_Backup/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
